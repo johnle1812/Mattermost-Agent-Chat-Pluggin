@@ -1,0 +1,46 @@
+{
+    "id": "com.designveloper.agent-assistant",
+    "name": "Agent Assistant",
+    "version": "0.3.1",
+    "description": "A shared RHS conversation interface for chatting with an existing agent bot through Mattermost.",
+    "icon_path": "assets/agent-assistant-icon.svg",
+    "min_server_version": "10.11.0",
+    "server": {
+        "executables": {
+            "linux-amd64": "server/dist/plugin-linux-amd64"
+        }
+    },
+    "webapp": {
+        "bundle_path": "webapp/dist/main.js"
+    },
+    "settings_schema": {
+        "header": "Connect Agent Assistant to an existing Mattermost bot and shared conversation channel. These settings are installation-specific and must be supplied by a Mattermost administrator.",
+        "footer": "The plugin contains no bot or provider credentials. The configured bot must already be connected to its agent service and have access to the configured channel.",
+        "settings": [
+            {
+                "key": "TeamName",
+                "display_name": "Mattermost team name:",
+                "type": "text",
+                "default": "",
+                "placeholder": "your-team-name",
+                "help_text": "Required. URL-safe team name from the Mattermost URL, for example: your-team-name."
+            },
+            {
+                "key": "ChannelName",
+                "display_name": "Mattermost channel name:",
+                "type": "text",
+                "default": "",
+                "placeholder": "agent-conversations",
+                "help_text": "Required. URL-safe channel name used to store shared Agent conversations. The bot and intended users must be channel members."
+            },
+            {
+                "key": "BotUsername",
+                "display_name": "Agent Mattermost bot username:",
+                "type": "text",
+                "default": "",
+                "placeholder": "your_agent_bot",
+                "help_text": "Required. Username of an existing Mattermost bot connected to the agent service. Do not enter an access token here."
+            }
+        ]
+    }
+}

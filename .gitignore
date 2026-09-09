@@ -1,0 +1,32 @@
+bin/
+dist/
+webapp/src/manifest.ts
+server/manifest.go
+server/dist/
+webapp/dist/
+webapp/node_modules/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Test and tool output
+coverage/
+coverage.txt
+webapp/junit.xml
+webapp/.eslintcache
+
+# Mac
+.DS_Store
+
+# Jetbrains
+.idea/
+
+# VS Code
+.vscode/*
+!.vscode/settings.json

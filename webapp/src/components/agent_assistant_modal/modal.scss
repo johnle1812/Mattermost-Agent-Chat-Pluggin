@@ -1,0 +1,99 @@
+.agent-assistant-modal {
+    display: flex;
+    width: min(1180px, calc(100vw - 64px));
+    height: min(820px, calc(100vh - 64px));
+    min-width: 0;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid rgba(var(--center-channel-color-rgb), 0.16);
+    border-radius: 12px;
+    color: var(--center-channel-color);
+    background: var(--center-channel-bg);
+    box-shadow: 0 24px 72px rgba(0, 0, 0, 0.36);
+
+    &__backdrop {
+        position: fixed;
+        z-index: 9999;
+        display: grid;
+        inset: 0;
+        place-items: center;
+        padding: 32px;
+        background: rgba(0, 0, 0, 0.48);
+    }
+
+    &__header {
+        display: flex;
+        height: 56px;
+        flex: 0 0 56px;
+        align-items: center;
+        padding: 0 12px 0 18px;
+        gap: 4px;
+        border-bottom: 1px solid rgba(var(--center-channel-color-rgb), 0.12);
+
+        > div {
+            display: flex;
+            min-width: 0;
+            flex: 1;
+            align-items: center;
+            gap: 10px;
+        }
+
+        strong {
+            overflow: hidden;
+            font-size: 16px;
+            font-weight: 600;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+    }
+
+    &__mark {
+        display: grid;
+        width: 30px;
+        height: 30px;
+        flex: 0 0 30px;
+        place-items: center;
+        border-radius: 8px;
+        color: var(--button-color);
+        background: var(--button-bg);
+        font-size: 17px;
+    }
+
+    &__close {
+        display: grid;
+        width: 36px;
+        height: 36px;
+        flex: 0 0 36px;
+        place-items: center;
+        border: 0;
+        border-radius: 6px;
+        color: rgba(var(--center-channel-color-rgb), 0.72);
+        background: transparent;
+        cursor: pointer;
+
+        &:hover,
+        &:focus-visible {
+            outline: 0;
+            background: rgba(var(--center-channel-color-rgb), 0.08);
+        }
+    }
+
+    &__content {
+        min-height: 0;
+        flex: 1;
+    }
+}
+
+@media (max-width: 760px) {
+    .agent-assistant-modal {
+        width: 100vw;
+        height: 100vh;
+        border: 0;
+        border-radius: 0;
+
+        &__backdrop {
+            padding: 0;
+        }
+    }
+}

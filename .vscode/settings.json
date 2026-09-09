@@ -1,0 +1,8 @@
+{
+    "eslint.workingDirectories": [
+        "webapp"
+    ],
+    "typescript.tsdk": "webapp/node_modules/typescript/lib",
+    "typescript.enablePromptUseWorkspaceTsdk": true,
+    "js/ts.tsdk.path": "webapp/node_modules/typescript/lib"
+}
