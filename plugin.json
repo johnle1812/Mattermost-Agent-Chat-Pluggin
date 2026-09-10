@@ -14,8 +14,8 @@
         "bundle_path": "webapp/dist/main.js"
     },
     "settings_schema": {
-        "header": "Connect Agent Assistant to an existing Mattermost bot and shared conversation channel. These settings are installation-specific and must be supplied by a Mattermost administrator.",
-        "footer": "The plugin contains no bot or provider credentials. The configured bot must already be connected to its agent service and have access to the configured channel.",
+        "header": "Connect Agent Assistant to an existing Mattermost bot and team. These settings are installation-specific and must be supplied by a Mattermost administrator.",
+        "footer": "The plugin contains no bot or provider credentials. Users may select any channel they belong to in the configured team; the bot and its gateway must also be able to process messages in each selected channel.",
         "settings": [
             {
                 "key": "TeamName",
@@ -27,11 +27,11 @@
             },
             {
                 "key": "ChannelName",
-                "display_name": "Mattermost channel name:",
+                "display_name": "Default Mattermost channel name:",
                 "type": "text",
                 "default": "",
                 "placeholder": "agent-conversations",
-                "help_text": "Required. URL-safe channel name used to store shared Agent conversations. The bot and intended users must be channel members."
+                "help_text": "Required. URL-safe preferred channel. It is selected only for users who have joined it; other users start in their first accessible channel and can choose another."
             },
             {
                 "key": "BotUsername",

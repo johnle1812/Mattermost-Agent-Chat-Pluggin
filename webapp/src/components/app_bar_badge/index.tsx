@@ -4,8 +4,10 @@ import {useEffect, useState} from 'react';
 import type {Post} from '@mattermost/types/posts';
 
 import {
+    AGENT_CHANNEL_CHANGED_EVENT,
     AGENT_POST_CHANGED_EVENT,
     AGENT_UNREAD_CHANGED_EVENT,
+    contextForAgentChannel,
     loadAgentUnreadCount,
     resolveAgentChannel,
 } from '../../api/agent_channel';
@@ -56,7 +58,7 @@ const AppBarUnreadBadge = () => {
                 return;
             }
             try {
-                const count = await loadAgentUnreadCount(context);
+                const count = await loadAgentUnreadCount(context, context.channels.map((channel) => channel.id));
                 if (!cancelled) {
                     setUnreadCount(count);
                 }
@@ -67,7 +69,7 @@ const AppBarUnreadBadge = () => {
 
         const handlePostChange = (event: Event) => {
             const post = (event as CustomEvent<Post>).detail;
-            if (!context || post?.channel_id !== context.channelId) {
+            if (!context || !context.channels.some((channel) => channel.id === post?.channel_id)) {
                 return;
             }
             if (postRefreshTimer) {
@@ -76,10 +78,15 @@ const AppBarUnreadBadge = () => {
             postRefreshTimer = window.setTimeout(() => refresh().catch(() => undefined), POST_REFRESH_DELAY_MS);
         };
 
-        const handleUnreadChange = (event: Event) => {
-            const count = (event as CustomEvent<number>).detail;
-            if (Number.isFinite(count)) {
-                setUnreadCount(Math.max(0, count));
+        const handleUnreadChange = () => {
+            refresh().catch(() => undefined);
+        };
+
+        const handleChannelChange = (event: Event) => {
+            const channelId = (event as CustomEvent<string>).detail;
+            if (context && channelId) {
+                context = contextForAgentChannel(context, channelId);
+                refresh().catch(() => undefined);
             }
         };
 
@@ -103,6 +110,7 @@ const AppBarUnreadBadge = () => {
 
         window.addEventListener(AGENT_POST_CHANGED_EVENT, handlePostChange);
         window.addEventListener(AGENT_UNREAD_CHANGED_EVENT, handleUnreadChange);
+        window.addEventListener(AGENT_CHANNEL_CHANGED_EVENT, handleChannelChange);
         document.addEventListener('visibilitychange', handleVisibilityChange);
         start().catch(() => undefined);
 
@@ -116,6 +124,7 @@ const AppBarUnreadBadge = () => {
             }
             window.removeEventListener(AGENT_POST_CHANGED_EVENT, handlePostChange);
             window.removeEventListener(AGENT_UNREAD_CHANGED_EVENT, handleUnreadChange);
+            window.removeEventListener(AGENT_CHANNEL_CHANGED_EVENT, handleChannelChange);
             document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
     }, []);

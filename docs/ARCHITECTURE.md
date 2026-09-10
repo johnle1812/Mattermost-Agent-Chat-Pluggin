@@ -7,8 +7,11 @@
 The React/TypeScript web app owns the visible experience:
 
 - registers the right-hand sidebar and app-bar icon;
-- resolves the configured team, channel, and bot through Mattermost APIs;
-- reads channel root posts and their replies;
+- resolves the configured team, default channel, and bot through Mattermost APIs;
+- lists the public and private channels available to the signed-in user;
+- selects the configured default only when the user belongs to it, otherwise choosing the first accessible channel;
+- lists every normal, non-deleted root post from the user's selected channel, including roots with no replies;
+- loads channel summaries in pages and fetches the complete reply thread and participant list only when opened;
 - maps Mattermost posts to conversation and message view models;
 - creates posts, replies, and root-post metadata updates;
 - listens for Mattermost websocket post events and refreshes the UI;
@@ -29,7 +32,7 @@ The bot integration is external to this repository. The plugin sends normal Matt
 | Messages and replies | Mattermost posts | Shared with channel members |
 | Conversation title and owner | Root-post props | Shared with channel members |
 | Read/unread state | Mattermost thread state | Per user |
-| Pinned conversations | Browser `localStorage` | Per browser/user session |
+| Selected channel and pinned conversations | Browser `localStorage` | Per browser/user session |
 | Agent credentials and memory | External gateway/agent stack | Outside this plugin |
 
 ## Important identifiers
@@ -42,4 +45,4 @@ The plugin ID and post-property keys are stable protocol identifiers. Renaming C
 
 ## Security boundary
 
-The configuration API requires a valid Mattermost user session. It returns only team, channel, and bot usernames. Authorization for reading or posting messages remains enforced by Mattermost channel membership and permissions. Agent/provider credentials belong in the external gateway's secret store, not in the browser bundle or plugin settings.
+The configuration API requires a valid Mattermost user session. It returns only the team, default channel, and bot usernames. The web app obtains the user's channel list directly from Mattermost. Authorization for reading or posting messages remains enforced by Mattermost channel membership and permissions. Agent/provider credentials belong in the external gateway's secret store, not in the browser bundle or plugin settings.

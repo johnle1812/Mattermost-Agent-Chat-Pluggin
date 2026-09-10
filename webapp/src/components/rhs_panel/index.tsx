@@ -3,7 +3,9 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import StreamingMessageText from './streaming_message_text';
 
 import {
+    AGENT_CHANNEL_CHANGED_EVENT,
     AGENT_POST_CHANGED_EVENT,
+    contextForAgentChannel,
     createAgentConversation,
     loadAgentConversation,
     loadAgentConversations,
@@ -13,6 +15,7 @@ import {
     renameAgentConversation,
     replyToAgentConversation,
     resolveAgentChannel,
+    selectAgentChannel,
     setConversationPinned,
 } from '../../api/agent_channel';
 import type {AgentChannelContext, AgentMentionUser} from '../../api/agent_channel';
@@ -51,6 +54,30 @@ const BOTTOM_FOLLOW_DISTANCE_PX = 72;
 const SINGLE_CLICK_DELAY_MS = 240;
 const MAX_VISIBLE_PARTICIPANTS = 3;
 
+function mergeConversationSummaries(current: Conversation[], incoming: Conversation[]): Conversation[] {
+    const incomingIds = new Set(incoming.map((conversation) => conversation.id));
+    const currentById = new Map(current.map((conversation) => [conversation.id, conversation]));
+    const mergedIncoming = incoming.map((summary) => {
+        const existing = currentById.get(summary.id);
+        if (!existing?.threadLoaded) {
+            return summary;
+        }
+
+        return {
+            ...summary,
+            messages: existing.messages,
+            participants: existing.participants,
+            threadLoaded: true,
+        };
+    });
+
+    return [
+        ...current.filter((conversation) => !conversation.rootPostId),
+        ...mergedIncoming,
+        ...current.filter((conversation) => conversation.rootPostId && !incomingIds.has(conversation.id)),
+    ];
+}
+
 type RHSPanelProps = {
     initialConversationId?: string | null;
     initialDraft?: string;
@@ -71,6 +98,10 @@ const RHSPanel = ({
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [agentContext, setAgentContext] = useState<AgentChannelContext | null>(null);
     const [loading, setLoading] = useState(true);
+    const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [nextConversationPage, setNextConversationPage] = useState(1);
+    const [hasMoreConversations, setHasMoreConversations] = useState(false);
     const [sending, setSending] = useState(false);
     const [error, setError] = useState('');
     const [view, setView] = useState<View>(initialView);
@@ -166,7 +197,6 @@ const RHSPanel = ({
 
     useEffect(() => {
         let cancelled = false;
-        let refreshTimer: number | undefined;
 
         const start = async () => {
             try {
@@ -175,30 +205,6 @@ const RHSPanel = ({
                     return;
                 }
                 setAgentContext(context);
-
-                const refresh = async () => {
-                    try {
-                        const loadedConversations = await loadAgentConversations(context);
-                        if (!cancelled) {
-                            setConversations((current) => [
-                                ...current.filter((conversation) => !conversation.rootPostId),
-                                ...loadedConversations,
-                            ]);
-                            setError('');
-                        }
-                    } catch (refreshError) {
-                        if (!cancelled) {
-                            setError(refreshError instanceof Error ? refreshError.message : 'Unable to load agent conversations.');
-                        }
-                    } finally {
-                        if (!cancelled) {
-                            setLoading(false);
-                        }
-                    }
-                };
-
-                await refresh();
-                refreshTimer = window.setInterval(() => refresh().catch(() => undefined), REFRESH_INTERVAL_MS);
             } catch (setupError) {
                 if (!cancelled) {
                     setLoading(false);
@@ -210,11 +216,84 @@ const RHSPanel = ({
         start().catch(() => undefined);
         return () => {
             cancelled = true;
-            if (refreshTimer) {
-                window.clearInterval(refreshTimer);
-            }
         };
     }, []);
+
+    useEffect(() => {
+        if (!agentContext) {
+            return undefined;
+        }
+
+        let cancelled = false;
+        let initialRefresh = true;
+        const refresh = async () => {
+            try {
+                const page = await loadAgentConversations(agentContext, 0);
+                if (!cancelled) {
+                    setConversations((current) => mergeConversationSummaries(current, page.conversations));
+                    if (initialRefresh) {
+                        setHasMoreConversations(page.hasMore);
+                        initialRefresh = false;
+                    }
+                    setError('');
+                }
+            } catch (refreshError) {
+                if (!cancelled) {
+                    setError(refreshError instanceof Error ? refreshError.message : 'Unable to load agent conversations.');
+                }
+            } finally {
+                if (!cancelled) {
+                    setLoading(false);
+                }
+            }
+        };
+
+        setLoading(true);
+        setNextConversationPage(1);
+        setHasMoreConversations(false);
+        refresh().catch(() => undefined);
+        const refreshTimer = window.setInterval(() => refresh().catch(() => undefined), REFRESH_INTERVAL_MS);
+        return () => {
+            cancelled = true;
+            window.clearInterval(refreshTimer);
+        };
+    }, [agentContext]);
+
+    useEffect(() => {
+        if (!agentContext) {
+            return undefined;
+        }
+
+        const changeChannel = (event: Event) => {
+            const channelId = (event as CustomEvent<string>).detail;
+            if (!channelId || channelId === agentContext.channelId) {
+                return;
+            }
+
+            const nextContext = contextForAgentChannel(agentContext, channelId);
+            if (nextContext.channelId === agentContext.channelId) {
+                return;
+            }
+
+            setConversations([]);
+            setSelectedId(null);
+            setView('library');
+            setDraft('');
+            setSearch('');
+            setOwner('All');
+            setContextMenu(null);
+            setAwaitingConversationIds([]);
+            setTypingMessageIds([]);
+            setLoadingConversationId(null);
+            setLoadingMore(false);
+            setNextConversationPage(1);
+            setHasMoreConversations(false);
+            setAgentContext(nextContext);
+        };
+
+        window.addEventListener(AGENT_CHANNEL_CHANGED_EVENT, changeChannel);
+        return () => window.removeEventListener(AGENT_CHANNEL_CHANGED_EVENT, changeChannel);
+    }, [agentContext]);
 
     useEffect(() => {
         if (!agentContext) {
@@ -431,6 +510,41 @@ const RHSPanel = ({
         setView('chat');
         setEditingTitle(false);
         setContextMenu(null);
+
+        const conversation = conversations.find((item) => item.id === conversationId);
+        if (!agentContext || !conversation?.rootPostId || conversation.threadLoaded) {
+            return;
+        }
+
+        setLoadingConversationId(conversationId);
+        loadAgentConversation(agentContext, conversation.rootPostId).then((loadedConversation) => {
+            if (loadedConversation) {
+                updateConversation(conversationId, () => loadedConversation);
+            }
+        }).catch((loadError) => {
+            setError(loadError instanceof Error ? loadError.message : 'Unable to load the complete conversation.');
+        }).finally(() => {
+            setLoadingConversationId((current) => (current === conversationId ? null : current));
+        });
+    };
+
+    const loadMoreConversations = async () => {
+        if (!agentContext || loadingMore || !hasMoreConversations) {
+            return;
+        }
+
+        setLoadingMore(true);
+        try {
+            const page = await loadAgentConversations(agentContext, nextConversationPage);
+            setConversations((current) => mergeConversationSummaries(current, page.conversations));
+            setNextConversationPage((current) => current + 1);
+            setHasMoreConversations(page.hasMore);
+            setError('');
+        } catch (loadError) {
+            setError(loadError instanceof Error ? loadError.message : 'Unable to load more conversations.');
+        } finally {
+            setLoadingMore(false);
+        }
     };
 
     const showLibrary = () => {
@@ -491,6 +605,7 @@ const RHSPanel = ({
             pinned: false,
             updatedAt: now,
             messages: [],
+            threadLoaded: true,
         };
 
         setConversations((current) => [conversation, ...current]);
@@ -693,6 +808,7 @@ const RHSPanel = ({
                     rootPostId: rootPost.id,
                     channelId: rootPost.channel_id,
                     ownerId: rootPost.user_id,
+                    threadLoaded: true,
                     messages: conversation.messages.map((message) => (message.id === userMessage.id ? {
                         ...message,
                         id: rootPost.id,
@@ -841,6 +957,30 @@ const RHSPanel = ({
                                     )}
                                 </div>
                             </div>
+                            <label className='seo-assistant__channel-picker'>
+                                <i className={agentContext?.channelType === 'P' ? 'icon-lock-outline' : 'icon-globe'}/>
+                                <select
+                                    aria-label='Choose a Mattermost channel'
+                                    disabled={!agentContext || agentContext.channels.length < 2}
+                                    onChange={(event) => {
+                                        if (agentContext) {
+                                            selectAgentChannel(agentContext, event.target.value);
+                                        }
+                                    }}
+                                    value={agentContext?.channelId ?? ''}
+                                >
+                                    {!agentContext && <option value=''>{'Loading channels…'}</option>}
+                                    {agentContext?.channels.map((channel) => (
+                                        <option
+                                            key={channel.id}
+                                            value={channel.id}
+                                        >
+                                            {`${channel.type === 'P' ? 'Private · ' : ''}#${channel.displayName}`}
+                                        </option>
+                                    ))}
+                                </select>
+                                <i className='icon-chevron-down'/>
+                            </label>
                             <button
                                 className='seo-assistant__new-button'
                                 disabled={!agentContext}
@@ -917,6 +1057,16 @@ const RHSPanel = ({
                                     <span>{conversations.length === 0 ? 'Create the first shared agent conversation.' : 'Try another search or filter.'}</span>
                                 </div>
                             )}
+                            {!loading && hasMoreConversations && (
+                                <button
+                                    className='seo-assistant__load-more'
+                                    disabled={loadingMore}
+                                    onClick={() => loadMoreConversations().catch(() => undefined)}
+                                    type='button'
+                                >
+                                    {loadingMore ? 'Loading more…' : 'Load more conversations'}
+                                </button>
+                            )}
                         </div>
                     </section>
                 )}
@@ -963,7 +1113,7 @@ const RHSPanel = ({
                                 <>
                                     <div className='seo-assistant__chat-title'>
                                         <h3>{selectedConversation.title}</h3>
-                                        <small>{`Created by ${selectedConversation.owner} · Shared with team`}</small>
+                                        <small>{`#${agentContext?.channelDisplayName ?? 'channel'} · Created by ${selectedConversation.owner} · Shared with team`}</small>
                                     </div>
                                     <button
                                         aria-label='Rename conversation'
@@ -985,6 +1135,16 @@ const RHSPanel = ({
                             }}
                             ref={messageListRef}
                         >
+                            {loadingConversationId === selectedConversation.id && (
+                                <div
+                                    aria-live='polite'
+                                    className='seo-assistant__thread-loading'
+                                    role='status'
+                                >
+                                    <i className='icon-refresh spin'/>
+                                    <span>{'Loading replies and participants…'}</span>
+                                </div>
+                            )}
                             {selectedConversation.messages.length === 0 && (
                                 <div className='seo-assistant__empty-chat'>
                                     <div className='seo-assistant__bot-mark'>{'✦'}</div>

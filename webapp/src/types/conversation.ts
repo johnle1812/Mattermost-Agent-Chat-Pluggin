@@ -28,6 +28,7 @@ export type Conversation = {
     pinned: boolean;
     updatedAt: string;
     messages: Message[];
+    threadLoaded?: boolean;
 };
 
 export type ConversationSort = 'updated' | 'title';

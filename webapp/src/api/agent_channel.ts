@@ -9,6 +9,7 @@ import type {Conversation, Message} from '../types/conversation';
 
 export const AGENT_POST_CHANGED_EVENT = `${manifest.id}.post-changed`;
 export const AGENT_UNREAD_CHANGED_EVENT = `${manifest.id}.unread-changed`;
+export const AGENT_CHANNEL_CHANGED_EVENT = `${manifest.id}.channel-changed`;
 
 const CONVERSATION_PROP = 'com_designveloper_agent_conversation';
 const STREAM_STATUS_PROP = 'com_designveloper_agent_stream_status';
@@ -16,7 +17,8 @@ const STREAM_PROGRESS_PROP = 'com_designveloper_agent_progress';
 const PINNED_STORAGE_KEY = `${manifest.id}.pinned-conversations`;
 const LEGACY_PINNED_STORAGE_KEY = 'com.designveloper.seo-assistant.pinned-conversations';
 const PLUGIN_API_BASE = `/plugins/${manifest.id}/api/v1`;
-const POSTS_PER_PAGE = 200;
+const POSTS_PER_PAGE = 50;
+const SELECTED_CHANNEL_STORAGE_PREFIX = `${manifest.id}.selected-channel`;
 
 type ConversationMetadata = {
     title?: string;
@@ -31,6 +33,17 @@ export type AgentChannelContext = {
     currentUserId: string;
     teamId: string;
     teamName: string;
+    channelName: string;
+    channelDisplayName: string;
+    channelType: 'O' | 'P';
+    channels: AgentChannelOption[];
+};
+
+export type AgentChannelOption = {
+    id: string;
+    name: string;
+    displayName: string;
+    type: 'O' | 'P';
 };
 
 export type AgentMentionUser = {
@@ -38,6 +51,11 @@ export type AgentMentionUser = {
     id: string;
     isBot: boolean;
     username: string;
+};
+
+export type AgentConversationPage = {
+    conversations: Conversation[];
+    hasMore: boolean;
 };
 
 type AgentConnectionConfig = {
@@ -67,7 +85,10 @@ function stripBotMention(message: string, botUsername: string): string {
 }
 
 function isConversationRoot(post: Post): boolean {
-    return !post.root_id && Boolean(metadataFor(post) || (post.reply_count ?? 0) > 0);
+    // Mattermost's ordinary user and bot posts have an empty type. System posts
+    // (join/leave messages, header changes, and similar events) use a named type
+    // and should not become conversations in the assistant library.
+    return !post.root_id && !post.delete_at && Boolean(metadataFor(post) || post.type === '');
 }
 
 function titleFromRoot(root: Post, botUsername: string, owner: string): string {
@@ -121,21 +142,75 @@ export async function resolveAgentChannel(): Promise<AgentChannelContext> {
     }
     const config = await configResponse.json() as AgentConnectionConfig;
 
-    const [channel, bot, currentUser] = await Promise.all([
-        Client4.getChannelByNameAndTeamName(config.team_name, config.channel_name),
+    const [team, bot, currentUser] = await Promise.all([
+        Client4.getTeamByName(config.team_name),
         Client4.getUserByUsername(config.bot_username),
         Client4.getMe(),
     ]);
+
+    const myChannels = await Client4.getMyChannels(team.id, false);
+    const channels = myChannels.
+        filter((channel) => !channel.delete_at && (channel.type === 'O' || channel.type === 'P')).
+        map((channel): AgentChannelOption => ({
+            id: channel.id,
+            name: channel.name,
+            displayName: channel.display_name,
+            type: channel.type as 'O' | 'P',
+        })).
+        sort((left, right) => left.displayName.localeCompare(right.displayName));
+
+    const storageKey = `${SELECTED_CHANNEL_STORAGE_PREFIX}.${currentUser.id}.${team.id}`;
+    const storedChannelId = window.localStorage.getItem(storageKey);
+    const selectedChannel = channels.find((channel) => channel.id === storedChannelId) ??
+        channels.find((channel) => channel.name === config.channel_name) ?? channels[0];
+
+    if (!selectedChannel) {
+        throw new Error(`You have not joined any channels in the ${team.display_name} team.`);
+    }
+
+    window.localStorage.setItem(storageKey, selectedChannel.id);
 
     return {
         botUsername: config.bot_username,
         botDisplayName: displayName(bot, currentUser.id),
         botUserId: bot.id,
-        channelId: channel.id,
+        channelId: selectedChannel.id,
+        channelName: selectedChannel.name,
+        channelDisplayName: selectedChannel.displayName,
+        channelType: selectedChannel.type,
+        channels,
         currentUserId: currentUser.id,
-        teamId: channel.team_id,
-        teamName: config.team_name,
+        teamId: team.id,
+        teamName: team.name,
     };
+}
+
+export function contextForAgentChannel(context: AgentChannelContext, channelId: string): AgentChannelContext {
+    const channel = context.channels.find((option) => option.id === channelId);
+    if (!channel) {
+        return context;
+    }
+
+    return {
+        ...context,
+        channelId: channel.id,
+        channelName: channel.name,
+        channelDisplayName: channel.displayName,
+        channelType: channel.type,
+    };
+}
+
+export function selectAgentChannel(context: AgentChannelContext, channelId: string): void {
+    const nextContext = contextForAgentChannel(context, channelId);
+    if (nextContext.channelId === context.channelId) {
+        return;
+    }
+
+    const storageKey = `${SELECTED_CHANNEL_STORAGE_PREFIX}.${context.currentUserId}.${context.teamId}`;
+    window.localStorage.setItem(storageKey, nextContext.channelId);
+    window.dispatchEvent(new CustomEvent<string>(AGENT_CHANNEL_CHANGED_EVENT, {
+        detail: nextContext.channelId,
+    }));
 }
 
 export async function loadAgentMentionUsers(context: AgentChannelContext): Promise<AgentMentionUser[]> {
@@ -177,9 +252,13 @@ export function publishAgentUnreadCount(count: number): void {
     }));
 }
 
-export async function loadAgentUnreadCount(context: AgentChannelContext): Promise<number> {
+export async function loadAgentUnreadCount(
+    context: AgentChannelContext,
+    channelIds: string[] = [context.channelId],
+): Promise<number> {
     const pageSize = 100;
     let unreadCount = 0;
+    const includedChannelIds = new Set(channelIds);
 
     const loadPage = async (after = ''): Promise<void> => {
         const userThreads = await Client4.getUserThreads(context.currentUserId, context.teamId, {
@@ -189,7 +268,7 @@ export async function loadAgentUnreadCount(context: AgentChannelContext): Promis
             unread: true,
         });
         userThreads.threads.forEach((thread) => {
-            if (thread.post.channel_id === context.channelId) {
+            if (includedChannelIds.has(thread.post.channel_id)) {
                 unreadCount += thread.unread_replies;
             }
         });
@@ -204,6 +283,39 @@ export async function loadAgentUnreadCount(context: AgentChannelContext): Promis
 
     await loadPage();
     return unreadCount;
+}
+
+async function unreadRepliesByRoot(
+    context: AgentChannelContext,
+    channelIds: string[] = [context.channelId],
+): Promise<Map<string, number>> {
+    const pageSize = 100;
+    const includedChannelIds = new Set(channelIds);
+    const unreadByRoot = new Map<string, number>();
+
+    const loadPage = async (after = ''): Promise<void> => {
+        const userThreads = await Client4.getUserThreads(context.currentUserId, context.teamId, {
+            after,
+            extended: true,
+            perPage: pageSize,
+            unread: true,
+        });
+        userThreads.threads.forEach((thread) => {
+            if (includedChannelIds.has(thread.post.channel_id)) {
+                unreadByRoot.set(thread.id, thread.unread_replies);
+            }
+        });
+
+        if (userThreads.threads.length === pageSize) {
+            const nextAfter = userThreads.threads[userThreads.threads.length - 1].id;
+            if (nextAfter && nextAfter !== after) {
+                await loadPage(nextAfter);
+            }
+        }
+    };
+
+    await loadPage();
+    return unreadByRoot;
 }
 
 function messageFromPost(
@@ -268,6 +380,36 @@ async function conversationFromRoot(root: Post, context: AgentChannelContext): P
         pinned: pinnedIds.has(root.id),
         updatedAt: new Date(lastPost.update_at || lastPost.create_at).toISOString(),
         messages,
+        threadLoaded: true,
+    };
+}
+
+function conversationSummaryFromRoot(
+    root: Post,
+    profiles: Record<string, UserProfile>,
+    unreadByRoot: Map<string, number>,
+    context: AgentChannelContext,
+): Conversation {
+    const metadata = metadataFor(root);
+    const owner = displayName(profiles[root.user_id], context.currentUserId);
+    const participants = root.user_id === context.botUserId ? [] : [{
+        id: root.user_id,
+        name: owner,
+    }];
+
+    return {
+        id: root.id,
+        rootPostId: root.id,
+        channelId: root.channel_id,
+        title: metadata?.title || titleFromRoot(root, context.botUsername, owner),
+        owner,
+        ownerId: metadata?.owner_id || root.user_id,
+        participants,
+        unreadCount: unreadByRoot.get(root.id) ?? 0,
+        pinned: pinnedConversationIds().has(root.id),
+        updatedAt: new Date(root.last_reply_at || root.update_at || root.create_at).toISOString(),
+        messages: [messageFromPost(root, profiles, context)],
+        threadLoaded: (root.reply_count ?? 0) === 0,
     };
 }
 
@@ -294,24 +436,25 @@ export async function loadAgentConversation(
     return conversationFromRoot(root, context);
 }
 
-export async function loadAgentConversations(context: AgentChannelContext): Promise<Conversation[]> {
-    const rootById = new Map<string, Post>();
-    const loadPage = async (page: number): Promise<void> => {
-        const postList = await Client4.getPosts(context.channelId, page, POSTS_PER_PAGE, false);
-        postList.order.
-            map((postId) => postList.posts[postId]).
-            filter((post): post is Post => Boolean(post && isConversationRoot(post))).
-            forEach((post) => rootById.set(post.id, post));
-        if (postList.order.length === POSTS_PER_PAGE) {
-            await loadPage(page + 1);
-        }
+export async function loadAgentConversations(
+    context: AgentChannelContext,
+    page = 0,
+): Promise<AgentConversationPage> {
+    const postList = await Client4.getPosts(context.channelId, page, POSTS_PER_PAGE, false);
+    const roots = postList.order.
+        map((postId) => postList.posts[postId]).
+        filter((post): post is Post => Boolean(post && isConversationRoot(post)));
+    const userIds = Array.from(new Set(roots.map((root) => root.user_id).filter(Boolean)));
+    const [profileList, unreadByRoot] = await Promise.all([
+        userIds.length > 0 ? Client4.getProfilesByIds(userIds) : Promise.resolve([]),
+        unreadRepliesByRoot(context),
+    ]);
+    const profiles = Object.fromEntries(profileList.map((profile) => [profile.id, profile]));
+
+    return {
+        conversations: roots.map((root) => conversationSummaryFromRoot(root, profiles, unreadByRoot, context)),
+        hasMore: postList.order.length === POSTS_PER_PAGE,
     };
-
-    await loadPage(0);
-
-    const roots = Array.from(rootById.values());
-
-    return Promise.all(roots.map((root) => conversationFromRoot(root, context)));
 }
 
 export async function createAgentConversation(
