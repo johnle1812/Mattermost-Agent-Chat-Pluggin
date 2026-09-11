@@ -1416,7 +1416,7 @@ const RHSPanel = ({
                                 onSelect={(event) => updateMentionSearch(event.currentTarget.value, event.currentTarget.selectionStart)}
                                 placeholder={sending ? 'Sending to Mattermost…' : `Message team or mention @${agentContext?.botUsername ?? 'agent'}…`}
                                 ref={composerRef}
-                                rows={2}
+                                rows={1}
                                 value={draft}
                             />
                             <button
