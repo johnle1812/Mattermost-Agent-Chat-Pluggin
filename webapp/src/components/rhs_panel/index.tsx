@@ -1,5 +1,7 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 
+import type {UserProfile} from '@mattermost/types/users';
+
 import StreamingMessageText from './streaming_message_text';
 
 import {
@@ -10,6 +12,7 @@ import {
     loadAgentConversation,
     loadAgentConversations,
     loadAgentMentionUsers,
+    loadAgentUserProfile,
     markAgentConversationRead,
     publishAgentUnreadCount,
     renameAgentConversation,
@@ -47,6 +50,14 @@ type ContextMenuState = {
     conversationId: string;
     left: number;
     top: number;
+};
+
+type ProfilePopoverState = {
+    left: number;
+    loading: boolean;
+    profile: UserProfile | null;
+    top: number;
+    user: AgentMentionUser;
 };
 
 const REFRESH_INTERVAL_MS = 4000;
@@ -116,6 +127,7 @@ const RHSPanel = ({
     const [awaitingConversationIds, setAwaitingConversationIds] = useState<string[]>([]);
     const [typingMessageIds, setTypingMessageIds] = useState<string[]>([]);
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+    const [profilePopover, setProfilePopover] = useState<ProfilePopoverState | null>(null);
     const [libraryRenameId, setLibraryRenameId] = useState<string | null>(null);
     const [libraryTitleDraft, setLibraryTitleDraft] = useState('');
     const [mentionUsers, setMentionUsers] = useState<AgentMentionUser[]>([]);
@@ -282,6 +294,7 @@ const RHSPanel = ({
             setSearch('');
             setOwner('All');
             setContextMenu(null);
+            setProfilePopover(null);
             setAwaitingConversationIds([]);
             setTypingMessageIds([]);
             setLoadingConversationId(null);
@@ -372,7 +385,10 @@ const RHSPanel = ({
     }, [agentContext]);
 
     useEffect(() => {
-        const closeMenu = () => setContextMenu(null);
+        const closeMenu = () => {
+            setContextMenu(null);
+            setProfilePopover(null);
+        };
         const closeOnEscape = (event: KeyboardEvent) => {
             if (event.key === 'Escape') {
                 closeMenu();
@@ -714,6 +730,37 @@ const RHSPanel = ({
             conversationId: conversation.id,
             left: Math.max(8, Math.min(event.clientX - panelBounds.left, panelBounds.width - menuWidth - 8)),
             top: Math.max(8, Math.min(event.clientY - panelBounds.top, panelBounds.height - menuHeight - 8)),
+        });
+    };
+
+    const openMentionProfile = (event: React.MouseEvent<HTMLButtonElement>, user: AgentMentionUser) => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const panelBounds = panelRef.current?.getBoundingClientRect();
+        const triggerBounds = event.currentTarget.getBoundingClientRect();
+        if (!panelBounds) {
+            return;
+        }
+
+        const popoverWidth = Math.min(300, panelBounds.width - 16);
+        const popoverHeight = 210;
+        const left = Math.max(8, Math.min(triggerBounds.left - panelBounds.left, panelBounds.width - popoverWidth - 8));
+        const preferredTop = (triggerBounds.bottom - panelBounds.top) + 6;
+        const top = Math.max(8, Math.min(preferredTop, panelBounds.height - popoverHeight - 8));
+        setProfilePopover({left, loading: true, profile: null, top, user});
+
+        loadAgentUserProfile(user.id).then((profile) => {
+            setProfilePopover((current) => (current?.user.id === user.id ? {
+                ...current,
+                loading: false,
+                profile,
+            } : current));
+        }).catch(() => {
+            setProfilePopover((current) => (current?.user.id === user.id ? {
+                ...current,
+                loading: false,
+            } : current));
         });
     };
 
@@ -1196,8 +1243,11 @@ const RHSPanel = ({
                                             <StreamingMessageText
                                                 animate={typingMessageIds.includes(message.id)}
                                                 content={message.content}
+                                                currentUserId={agentContext?.currentUserId}
+                                                mentionUsers={mentionUsers}
                                                 messageId={message.id}
                                                 onComplete={finishTypingMessage}
+                                                onMentionClick={openMentionProfile}
                                                 onProgress={scrollToBottomIfFollowing}
                                                 streaming={Boolean(message.streaming)}
                                             />
@@ -1371,6 +1421,66 @@ const RHSPanel = ({
                     </section>
                 )}
             </div>
+
+            {profilePopover && (
+                <aside
+                    aria-label={`Profile for ${profilePopover.user.displayName}`}
+                    className='seo-assistant__profile-popover'
+                    onClick={(event) => event.stopPropagation()}
+                    style={{left: profilePopover.left, top: profilePopover.top}}
+                >
+                    <button
+                        aria-label='Close profile'
+                        className='icon-close seo-assistant__profile-close'
+                        onClick={() => setProfilePopover(null)}
+                        type='button'
+                    />
+                    <div className='seo-assistant__profile-header'>
+                        <span className='seo-assistant__profile-avatar'>
+                            <span>{initialsFor(profilePopover.user.displayName)}</span>
+                            <img
+                                alt=''
+                                onError={(event) => {
+                                    event.currentTarget.style.display = 'none';
+                                }}
+                                src={profileImageURL(profilePopover.user.id)}
+                            />
+                        </span>
+                        <span className='seo-assistant__profile-heading'>
+                            <strong>{profilePopover.user.displayName}</strong>
+                            <span>{`@${profilePopover.user.username}`}</span>
+                        </span>
+                        {profilePopover.user.isBot && <span className='seo-assistant__bot-badge'>{'BOT'}</span>}
+                    </div>
+                    {profilePopover.loading ? (
+                        <div className='seo-assistant__profile-loading'>{'Loading profile…'}</div>
+                    ) : (
+                        <div className='seo-assistant__profile-details'>
+                            {profilePopover.profile?.position && (
+                                <div>
+                                    <i className='icon-briefcase-outline'/>
+                                    <span>{profilePopover.profile.position}</span>
+                                </div>
+                            )}
+                            {profilePopover.profile?.email && (
+                                <div>
+                                    <i className='icon-email-outline'/>
+                                    <span>{profilePopover.profile.email}</span>
+                                </div>
+                            )}
+                            {profilePopover.user.isBot && profilePopover.profile?.bot_description && (
+                                <div>
+                                    <i className='icon-robot-outline'/>
+                                    <span>{profilePopover.profile.bot_description}</span>
+                                </div>
+                            )}
+                            {!profilePopover.profile?.position && !profilePopover.profile?.email && !profilePopover.profile?.bot_description && (
+                                <span className='seo-assistant__profile-empty'>{'No additional profile information is available.'}</span>
+                            )}
+                        </div>
+                    )}
+                </aside>
+            )}
 
             {contextMenu && menuConversation && (
                 <div

@@ -246,6 +246,10 @@ export async function loadAgentMentionUsers(context: AgentChannelContext): Promi
     return users;
 }
 
+export async function loadAgentUserProfile(userId: string): Promise<UserProfile> {
+    return Client4.getUser(userId);
+}
+
 export function publishAgentUnreadCount(count: number): void {
     window.dispatchEvent(new CustomEvent<number>(AGENT_UNREAD_CHANGED_EVENT, {
         detail: Math.max(0, count),
