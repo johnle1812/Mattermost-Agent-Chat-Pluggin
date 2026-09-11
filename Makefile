@@ -282,12 +282,7 @@ ifeq ($(PLUGIN_ID),com.mattermost.plugin-starter-template)
 	$(warning Consider editing plugin.json to configure your project with a unique plugin ID.)
 endif
 
-## Builds and installs the plugin to a server.
-.PHONY: deploy
-deploy: dist
-	./build/bin/pluginctl deploy $(PLUGIN_ID) dist/$(BUNDLE_NAME)
-
-## Builds and installs the plugin to a server, updating the webapp automatically when changed.
+## Builds the plugin and rebuilds the webapp automatically when changed.
 .PHONY: watch
 watch: apply server bundle
 ifeq ($(MM_DEBUG),)
@@ -295,11 +290,6 @@ ifeq ($(MM_DEBUG),)
 else
 	cd webapp && $(NPM) run debug:watch
 endif
-
-## Installs a previous built plugin with updated webpack assets to a server.
-.PHONY: deploy-from-watch
-deploy-from-watch: bundle
-	./build/bin/pluginctl deploy $(PLUGIN_ID) dist/$(BUNDLE_NAME)
 
 ## Setup dlv for attaching, identifying the plugin PID for other targets.
 .PHONY: setup-attach

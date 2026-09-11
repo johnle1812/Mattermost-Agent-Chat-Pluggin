@@ -7,6 +7,7 @@ import StreamingMessageText from './streaming_message_text';
 import {
     AGENT_CHANNEL_CHANGED_EVENT,
     AGENT_POST_CHANGED_EVENT,
+    AGENT_TYPING_EVENT,
     contextForAgentChannel,
     createAgentConversation,
     loadAgentConversation,
@@ -64,6 +65,7 @@ const REFRESH_INTERVAL_MS = 4000;
 const BOTTOM_FOLLOW_DISTANCE_PX = 72;
 const SINGLE_CLICK_DELAY_MS = 240;
 const MAX_VISIBLE_PARTICIPANTS = 3;
+const AGENT_TYPING_EXPIRY_MS = 8000;
 
 function mergeConversationSummaries(current: Conversation[], incoming: Conversation[]): Conversation[] {
     const incomingIds = new Set(incoming.map((conversation) => conversation.id));
@@ -347,6 +349,7 @@ const RHSPanel = ({
 
         let cancelled = false;
         let refreshTimer: number | undefined;
+        const typingExpiryTimers = new Map<string, number>();
         const handlePostChange = (event: Event) => {
             const post = (event as CustomEvent<{channel_id: string; id: string; root_id?: string; user_id: string; props?: Record<string, unknown>}>).detail;
             if (!post || post.channel_id !== agentContext.channelId) {
@@ -355,6 +358,11 @@ const RHSPanel = ({
 
             const rootPostId = post.root_id || post.id;
             if (post.user_id === agentContext.botUserId) {
+                const typingExpiryTimer = typingExpiryTimers.get(rootPostId);
+                if (typingExpiryTimer) {
+                    window.clearTimeout(typingExpiryTimer);
+                    typingExpiryTimers.delete(rootPostId);
+                }
                 setAwaitingConversationIds((current) => current.filter((id) => id !== rootPostId));
                 setTypingMessageIds((current) => (current.includes(post.id) ? current : [...current, post.id]));
             }
@@ -374,13 +382,40 @@ const RHSPanel = ({
             }, 80);
         };
 
+        const handleAgentTyping = (event: Event) => {
+            const typing = (event as CustomEvent<{channel_id: string; parent_id?: string; user_id: string}>).detail;
+            const rootPostId = typing?.parent_id;
+            if (
+                !rootPostId ||
+                typing.channel_id !== agentContext.channelId ||
+                typing.user_id !== agentContext.botUserId
+            ) {
+                return;
+            }
+
+            setAwaitingConversationIds((current) => (
+                current.includes(rootPostId) ? current : [...current, rootPostId]
+            ));
+            const currentTimer = typingExpiryTimers.get(rootPostId);
+            if (currentTimer) {
+                window.clearTimeout(currentTimer);
+            }
+            typingExpiryTimers.set(rootPostId, window.setTimeout(() => {
+                typingExpiryTimers.delete(rootPostId);
+                setAwaitingConversationIds((current) => current.filter((id) => id !== rootPostId));
+            }, AGENT_TYPING_EXPIRY_MS));
+        };
+
         window.addEventListener(AGENT_POST_CHANGED_EVENT, handlePostChange);
+        window.addEventListener(AGENT_TYPING_EVENT, handleAgentTyping);
         return () => {
             cancelled = true;
             if (refreshTimer) {
                 window.clearTimeout(refreshTimer);
             }
+            typingExpiryTimers.forEach((timer) => window.clearTimeout(timer));
             window.removeEventListener(AGENT_POST_CHANGED_EVENT, handlePostChange);
+            window.removeEventListener(AGENT_TYPING_EVENT, handleAgentTyping);
         };
     }, [agentContext]);
 
@@ -457,25 +492,6 @@ const RHSPanel = ({
     useEffect(() => {
         publishAgentUnreadCount(totalUnreadCount);
     }, [totalUnreadCount]);
-
-    useEffect(() => {
-        setAwaitingConversationIds((current) => current.filter((conversationId) => {
-            const conversation = conversations.find((item) => item.id === conversationId);
-            if (!conversation) {
-                return true;
-            }
-            let lastUserIndex = -1;
-            let lastAssistantIndex = -1;
-            conversation.messages.forEach((message, index) => {
-                if (message.role === 'user') {
-                    lastUserIndex = index;
-                } else {
-                    lastAssistantIndex = index;
-                }
-            });
-            return lastAssistantIndex <= lastUserIndex;
-        }));
-    }, [conversations]);
 
     const scrollToBottomIfFollowing = useCallback(() => {
         const messageList = messageListRef.current;

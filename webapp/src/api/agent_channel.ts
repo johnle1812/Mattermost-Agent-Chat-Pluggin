@@ -8,6 +8,7 @@ import {Client4} from 'mattermost-redux/client';
 import type {Conversation, Message} from '../types/conversation';
 
 export const AGENT_POST_CHANGED_EVENT = `${manifest.id}.post-changed`;
+export const AGENT_TYPING_EVENT = `${manifest.id}.typing`;
 export const AGENT_UNREAD_CHANGED_EVENT = `${manifest.id}.unread-changed`;
 export const AGENT_CHANNEL_CHANGED_EVENT = `${manifest.id}.channel-changed`;
 

@@ -75,7 +75,7 @@ See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the complete deployment checkli
 make dist
 ```
 
-The uploadable artifact is written to `dist/` as a `.tar.gz` file. The exact filename includes the plugin ID and version. `make deploy` first builds the same artifact and then attempts to upload it to a configured development server; use `make dist` when you only need the file.
+The uploadable artifact is written to `dist/` as a `.tar.gz` file. The exact filename includes the plugin ID and version. Building never uploads the plugin automatically.
 
 Run checks before sharing a build:
 
@@ -96,23 +96,6 @@ An administrator with `mmctl` access can alternatively run:
 ```bash
 mmctl plugin add --force ./dist/<generated-plugin-bundle>.tar.gz
 mmctl plugin enable com.designveloper.agent-assistant
-```
-
-## Development deployment
-
-For a local Mattermost server with local mode enabled:
-
-```bash
-export MM_LOCALSOCKETPATH=/var/tmp/mattermost_local.socket
-make deploy
-```
-
-For API deployment, keep credentials in your shell or secret manager—never in the repository:
-
-```bash
-export MM_SERVICESETTINGS_SITEURL=https://mattermost.example.com
-export MM_ADMIN_TOKEN='<admin-personal-access-token>'
-make deploy
 ```
 
 ## Before publishing this repository

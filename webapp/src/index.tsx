@@ -12,7 +12,7 @@ import type {GlobalState} from '@mattermost/types/store';
 
 import type {PluginComponent, PluginRegistry} from 'types/mattermost-webapp';
 
-import {AGENT_POST_CHANGED_EVENT} from './api/agent_channel';
+import {AGENT_POST_CHANGED_EVENT, AGENT_TYPING_EVENT} from './api/agent_channel';
 import AgentAssistantModal from './components/agent_assistant_modal';
 import AppBarUnreadBadge from './components/app_bar_badge';
 import RHSPanel from './components/rhs_panel';
@@ -53,6 +53,9 @@ export default class Plugin {
         });
         registry.registerWebSocketEventHandler<{post: string}>('post_edited', (message) => {
             forwardPostChange(message.data.post);
+        });
+        registry.registerWebSocketEventHandler<{channel_id: string; parent_id?: string; user_id: string}>('typing', (message) => {
+            window.dispatchEvent(new CustomEvent(AGENT_TYPING_EVENT, {detail: message.data}));
         });
 
         registry.registerGlobalComponent(AppBarUnreadBadge);
